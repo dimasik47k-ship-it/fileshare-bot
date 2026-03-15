@@ -257,6 +257,92 @@ async def cmd_start(message: Message):
         reply_markup=get_main_keyboard(),
         parse_mode='Markdown'
     )
+# ─────────────────────────────────────────────────────────────
+# 📚 Команда /help
+# ─────────────────────────────────────────────────────────────
+@dp.message(Command('help'))
+async def cmd_help(message: Message):
+    await message.answer(
+        "📚 **Справка по командам**\n\n"
+        "📁 **FileShare Bot** — твой персональный файлообменник\n\n"
+        "🔹 **Основные команды:**\n"
+        "• /start — 🏠 Запустить бота заново\n"
+        "• /help — 📚 Эта справка\n"
+        "• /myfiles — 📁 Показать мои файлы\n"
+        "• /stats — 📊 Показать статистику\n\n"
+        "🔹 **Как использовать:**\n"
+        "1️⃣ Нажми 📤 Загрузить файл в меню\n"
+        "2️⃣ Отправь любой файл (до 2 ГБ)\n"
+        "3️⃣ Получи уникальную ссылку для скачивания\n\n"
+        "🔗 **Полезные ссылки:**\n"
+        "• 🤖 Поддержка: @HelloFridge_Bot\n"
+        "• 🌐 Сайт: tegbi.netlify.app\n\n"
+        "💡 **Совет:** Файлы хранятся 24 часа, затем удаляются автоматически.",
+        reply_markup=get_back_keyboard(),
+        parse_mode='Markdown'
+    )
+
+# ─────────────────────────────────────────────────────────────
+# 📁 Команда /myfiles
+# ─────────────────────────────────────────────────────────────
+@dp.message(Command('myfiles'))
+async def cmd_myfiles(message: Message):
+    files = get_user_files(message.from_user.id)
+    
+    if not files:
+        await message.answer(
+            "📭 У тебя пока нет файлов.\n\n"
+            "Нажми 📤 Загрузить файл или отправь файл прямо в чат!",
+            reply_markup=get_main_keyboard()
+        )
+        return
+    
+    # Показываем первые 5 файлов
+    text = f"📁 **Твои файлы ({len(files)})**\n\n"
+    for f in files[:5]:
+        name = escape_markdown(f['original_name'][:30])
+        size = format_size(f['file_size']) if f['file_size'] else '?'
+        text += f"• 📄 `{f['file_id']}` — {name} ({size})\n"
+    
+    if len(files) > 5:
+        text += f"\n... и ещё {len(files) - 5} файлов"
+    
+    text += "\n\n💡 Нажми на ID файла в меню '📁 Мои файлы' для подробностей"
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='📁 Открыть меню файлов', callback_data='my_files')],
+            [InlineKeyboardButton(text='🏠 В главное меню', callback_data='back')]
+        ]),
+        parse_mode='Markdown'
+    )
+
+# ─────────────────────────────────────────────────────────────
+# 📊 Команда /stats
+# ─────────────────────────────────────────────────────────────
+@dp.message(Command('stats'))
+async def cmd_stats(message: Message):
+    stats = get_stats(message.from_user.id)
+    
+    total = stats['total']
+    done = stats['total_downloads']  # Используем download_count как "скачано"
+    rate = round(done / total * 100, 1) if total and total > 0 else 0
+    
+    text = f"📊 **Твоя статистика**\n\n"
+    text += f"📁 **Файлов загружено:** {total}\n"
+    text += f"📦 **Всего места:** {format_size(stats['total_size'])}\n"
+    text += f"⬇️ **Всего скачиваний:** {stats['total_downloads']}\n"
+    text += f"📈 **Популярность:** {create_progress_bar(min(int(rate), 100), 100, 10)} {rate}%"
+    
+    await message.answer(
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='🔄 Обновить', callback_data='stats')],
+            [InlineKeyboardButton(text='🏠 В главное меню', callback_data='back')]
+        ]),
+        parse_mode='Markdown'
+    ) 
 
 @dp.callback_query(F.data == 'upload_file')
 async def start_upload(callback: CallbackQuery, state: FSMContext):
