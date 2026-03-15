@@ -13,7 +13,7 @@ import random
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
-
+from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
@@ -27,6 +27,13 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 
+def escape_markdown(text: str) -> str:
+    """Экранирование специальных символов Markdown"""
+    if not text:
+        return ""
+    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+        text = text.replace(char, f'\\{char}')
+    return text
 # ─────────────────────────────────────────────────────────────
 # 🎨 Константы
 # ─────────────────────────────────────────────────────────────
@@ -267,13 +274,7 @@ async def start_upload(callback: CallbackQuery, state: FSMContext):
         parse_mode='Markdown'
     )
 
-def escape_markdown(text: str) -> str:
-    """Экранирование специальных символов Markdown"""
-    if not text:
-        return ""
-    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
-        text = text.replace(char, f'\\{char}')
-    return text
+
 
 @dp.message(FileStates.waiting_for_file, F.document | F.photo | F.video | F.audio | F.voice)
 async def process_file(message: Message, state: FSMContext):
@@ -412,7 +413,7 @@ async def view_file(callback: CallbackQuery):
     expires_at = parse_timestamp(file['expires_at'])
     
     text = f"📄 **Информация о файле**\n\n"
-    text += f"📝 **Название:** {file['original_name']}\n"
+    text += f"📝 **Название:** {escape_markdown(file['original_name'])}\n"
     text += f"📦 **Размер:** {size_text}\n"
     text += f"🔗 **ID:** `{file['file_id']}`\n"
     text += f"⬇️ **Скачиваний:** {file['download_count']}\n"
@@ -558,7 +559,7 @@ async def find_file_by_id(message: Message, state: FSMContext):
     
     await message.answer(
         f"📄 **Найден файл!**\n\n"
-        f"📝 **Название:** {file['original_name']}\n"
+        f"📝 **Название:** {escape_markdown(file['original_name'])}\n"
         f"📦 **Размер:** {size_text}\n"
         f"⬇️ **Скачиваний:** {file['download_count']}\n"
         f"⏰ **Загружен:** {created_at.strftime('%d.%m.%Y %H:%M') if created_at else 'Неизвестно'}",
@@ -628,14 +629,37 @@ async def cleanup_old_files():
         await asyncio.sleep(3600)
 
 # ─────────────────────────────────────────────────────────────
+# 🌐 Health Check для Render
+# ─────────────────────────────────────────────────────────────
+async def health_check(request):
+    """Простой endpoint для проверки статуса"""
+    return web.Response(text="OK")
+
+async def run_webserver():
+    """Запуск HTTP сервера на порту 8080"""
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    await site.start()
+    logger.info("🌐 Health Check запущен на порту 8080")
+
+# ─────────────────────────────────────────────────────────────
 # 🚀 Запуск
 # ─────────────────────────────────────────────────────────────
 async def main():
     init_db()
     logger.info("📁 FileShare Bot запущен!")
     
+    # ✅ Запуск HTTP сервера для Render
+    asyncio.create_task(run_webserver())
+    
+    # Запуск очистки старых файлов
     asyncio.create_task(cleanup_old_files())
     
+    # Запуск polling
     await dp.start_polling(bot)
 
 if __name__ == '__main__':
