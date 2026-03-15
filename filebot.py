@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-📁 FileShare Bot v4.0 — Полностью исправленная версия
-✅ Работает с Python 3.12+ • Premium 2GB • Исправлены все ошибки
+📁 FileShare Bot v5.0 — Полностью переписанная версия
+✅ Исправлены все ошибки • HTTP Health Check • Работает на Render
 """
+
 import logging
 import asyncio
 import sqlite3
@@ -13,6 +14,7 @@ import random
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Optional
+
 from aiohttp import web
 from aiogram import Bot, Dispatcher, F
 from aiogram.filters import Command
@@ -27,13 +29,6 @@ from aiogram.exceptions import TelegramBadRequest
 from aiogram.client.session.aiohttp import AiohttpSession
 from dotenv import load_dotenv
 
-def escape_markdown(text: str) -> str:
-    """Экранирование специальных символов Markdown"""
-    if not text:
-        return ""
-    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
-        text = text.replace(char, f'\\{char}')
-    return text
 # ─────────────────────────────────────────────────────────────
 # 🎨 Константы
 # ─────────────────────────────────────────────────────────────
@@ -111,6 +106,26 @@ def parse_timestamp(ts_string: str) -> Optional[datetime]:
     except:
         return None
 
+def escape_markdown(text: str) -> str:
+    if not text:
+        return ""
+    for char in ['_', '*', '[', ']', '(', ')', '~', '`', '>', '#', '+', '-', '=', '|', '{', '}', '.', '!']:
+        text = text.replace(char, f'\\{char}')
+    return text
+
+def format_size(size_bytes: int) -> str:
+    for unit in ['Б', 'КБ', 'МБ', 'ГБ']:
+        if size_bytes < 1024.0:
+            return f"{size_bytes:.1f} {unit}"
+        size_bytes /= 1024.0
+    return f"{size_bytes:.1f} ТБ"
+
+def create_progress_bar(current: int, total: int, length: int = 10) -> str:
+    if total == 0:
+        return '⬜' * length
+    filled = int(length * current / total)
+    return '🟩' * filled + '⬜' * (length - filled)
+
 # ─────────────────────────────────────────────────────────────
 # 🎨 Клавиатуры
 # ─────────────────────────────────────────────────────────────
@@ -157,12 +172,9 @@ class FileStates(StatesGroup):
     waiting_for_link = State()
 
 # ─────────────────────────────────────────────────────────────
-# 🧩 Бот инициализация (ИСПРАВЛЕНО!)
+# 🧩 Бот инициализация
 # ─────────────────────────────────────────────────────────────
-
-# Правильная настройка таймаута для aiogram 3.x (число, не объект!)
-BOT_TIMEOUT = 600  # 10 минут в секундах
-
+BOT_TIMEOUT = 600
 session = AiohttpSession(timeout=BOT_TIMEOUT)
 bot = Bot(token=API_TOKEN, session=session)
 dp = Dispatcher(storage=MemoryStorage())
@@ -232,12 +244,30 @@ def get_stats(user_id: int) -> dict:
             'total_downloads': row['total_downloads'] or 0
         } if row else {'total': 0, 'total_size': 0, 'total_downloads': 0}
 
-def format_size(size_bytes: int) -> str:
-    for unit in ['Б', 'КБ', 'МБ', 'ГБ']:
-        if size_bytes < 1024.0:
-            return f"{size_bytes:.1f} {unit}"
-        size_bytes /= 1024.0
-    return f"{size_bytes:.1f} ТБ"
+# ─────────────────────────────────────────────────────────────
+# 🌐 Health Check для Render
+# ─────────────────────────────────────────────────────────────
+async def health_check(request):
+    return web.json_response({
+        'status': 'ok',
+        'bot': '@TikO_Nbot',
+        'timestamp': datetime.now().isoformat()
+    })
+
+async def run_webserver():
+    port = int(os.getenv('PORT', 8080))
+    
+    app = web.Application()
+    app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
+    
+    runner = web.AppRunner(app)
+    await runner.setup()
+    
+    site = web.TCPSite(runner, '0.0.0.0', port)
+    await site.start()
+    
+    logger.info(f"🌐 Health Check сервер запущен на порту {port}")
 
 # ─────────────────────────────────────────────────────────────
 # 🎯 Хендлеры
@@ -257,9 +287,7 @@ async def cmd_start(message: Message):
         reply_markup=get_main_keyboard(),
         parse_mode='Markdown'
     )
-# ─────────────────────────────────────────────────────────────
-# 📚 Команда /help
-# ─────────────────────────────────────────────────────────────
+
 @dp.message(Command('help'))
 async def cmd_help(message: Message):
     await message.answer(
@@ -282,9 +310,6 @@ async def cmd_help(message: Message):
         parse_mode='Markdown'
     )
 
-# ─────────────────────────────────────────────────────────────
-# 📁 Команда /myfiles
-# ─────────────────────────────────────────────────────────────
 @dp.message(Command('myfiles'))
 async def cmd_myfiles(message: Message):
     files = get_user_files(message.from_user.id)
@@ -297,7 +322,6 @@ async def cmd_myfiles(message: Message):
         )
         return
     
-    # Показываем первые 5 файлов
     text = f"📁 **Твои файлы ({len(files)})**\n\n"
     for f in files[:5]:
         name = escape_markdown(f['original_name'][:30])
@@ -318,22 +342,21 @@ async def cmd_myfiles(message: Message):
         parse_mode='Markdown'
     )
 
-# ─────────────────────────────────────────────────────────────
-# 📊 Команда /stats
-# ─────────────────────────────────────────────────────────────
 @dp.message(Command('stats'))
 async def cmd_stats(message: Message):
     stats = get_stats(message.from_user.id)
     
     total = stats['total']
-    done = stats['total_downloads']  # Используем download_count как "скачано"
-    rate = round(done / total * 100, 1) if total and total > 0 else 0
+    downloads = stats['total_downloads']
     
     text = f"📊 **Твоя статистика**\n\n"
     text += f"📁 **Файлов загружено:** {total}\n"
     text += f"📦 **Всего места:** {format_size(stats['total_size'])}\n"
-    text += f"⬇️ **Всего скачиваний:** {stats['total_downloads']}\n"
-    text += f"📈 **Популярность:** {create_progress_bar(min(int(rate), 100), 100, 10)} {rate}%"
+    text += f"⬇️ **Всего скачиваний:** {downloads}\n"
+    
+    if total > 0:
+        rate = round(downloads / total * 100, 1)
+        text += f"📈 **Популярность:** {create_progress_bar(min(int(rate), 100), 100, 10)} {rate}%"
     
     await message.answer(
         text,
@@ -342,7 +365,7 @@ async def cmd_stats(message: Message):
             [InlineKeyboardButton(text='🏠 В главное меню', callback_data='back')]
         ]),
         parse_mode='Markdown'
-    ) 
+    )
 
 @dp.callback_query(F.data == 'upload_file')
 async def start_upload(callback: CallbackQuery, state: FSMContext):
@@ -359,8 +382,6 @@ async def start_upload(callback: CallbackQuery, state: FSMContext):
         reply_markup=get_back_keyboard(),
         parse_mode='Markdown'
     )
-
-
 
 @dp.message(FileStates.waiting_for_file, F.document | F.photo | F.video | F.audio | F.voice)
 async def process_file(message: Message, state: FSMContext):
@@ -445,7 +466,6 @@ async def process_file(message: Message, state: FSMContext):
     
     size_text = format_size(file_size) if file_size else "Неизвестно"
     
-    # ✅ ИСПРАВЛЕНО: экранируем название файла
     await message.answer(
         f"✅ **Файл загружен!**\n\n"
         f"📄 **Название:** {escape_markdown(original_name)}\n"
@@ -536,7 +556,7 @@ async def download_file(callback: CallbackQuery):
     try:
         await callback.message.answer_document(
             document=FSInputFile(file_path),
-            caption=f"📄 {file['original_name']}\n🔗 Скачано через FileShare Bot"
+            caption=f"📄 {escape_markdown(file['original_name'])}\n🔗 Скачано через FileShare Bot"
         )
     except Exception as e:
         logger.error(f"Ошибка отправки: {e}")
@@ -592,7 +612,6 @@ async def get_file_link(callback: CallbackQuery):
         await callback.answer("❌ Файл не найден!", show_alert=True)
         return
     
-    # ✅ ИСПРАВЛЕНО: получаем username через get_me()
     bot_info = await bot.get_me()
     bot_username = bot_info.username
     link_text = f"@{bot_username}?start=file_{file_id}"
@@ -657,12 +676,24 @@ async def find_file_by_id(message: Message, state: FSMContext):
 async def show_stats(callback: CallbackQuery):
     stats = get_stats(callback.from_user.id)
     
+    total = stats['total']
+    downloads = stats['total_downloads']
+    
+    text = f"📊 **Твоя статистика**\n\n"
+    text += f"📁 **Файлов:** {total}\n"
+    text += f"📦 **Всего места:** {format_size(stats['total_size'])}\n"
+    text += f"⬇️ **Всего скачиваний:** {downloads}\n"
+    
+    if total > 0:
+        rate = round(downloads / total * 100, 1)
+        text += f"📈 **Популярность:** {create_progress_bar(min(int(rate), 100), 100, 10)} {rate}%"
+    
     await callback.message.edit_text(
-        f"📊 **Твоя статистика**\n\n"
-        f"📁 **Файлов:** {stats['total']}\n"
-        f"📦 **Всего места:** {format_size(stats['total_size'])}\n"
-        f"⬇️ **Всего скачиваний:** {stats['total_downloads']}",
-        reply_markup=get_back_keyboard(),
+        text,
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text='🔄 Обновить', callback_data='stats')],
+            [InlineKeyboardButton(text='🏠 В главное меню', callback_data='back')]
+        ]),
         parse_mode='Markdown'
     )
 
@@ -715,47 +746,20 @@ async def cleanup_old_files():
         await asyncio.sleep(3600)
 
 # ─────────────────────────────────────────────────────────────
-# 🌐 Health Check для Render
-# ─────────────────────────────────────────────────────────────
-async def health_check(request):
-    """Endpoint для проверки статуса бота"""
-    return web.json_response({
-        'status': 'ok',
-        'bot': '@TikO_Nbot',
-        'timestamp': datetime.now().isoformat()
-    })
-
-async def run_webserver():
-    """Запуск HTTP сервера на порту из переменной окружения PORT"""
-    port = int(os.getenv('PORT', 8080))
-    
-    app = web.Application()
-    app.router.add_get('/', health_check)
-    app.router.add_get('/health', health_check)
-    
-    runner = web.AppRunner(app)
-    await runner.setup()
-    
-    site = web.TCPSite(runner, '0.0.0.0', port)
-    await site.start()
-    
-    logger.info(f"🌐 Health Check сервер запущен на порту {port}")
-
-# ─────────────────────────────────────────────────────────────
 # 🚀 Запуск
 # ─────────────────────────────────────────────────────────────
 async def main():
     init_db()
     logger.info("📁 FileShare Bot запущен!")
     
-    # ✅ Запуск HTTP сервера для Render
+    # Запуск HTTP сервера для Render
     asyncio.create_task(run_webserver())
     
     # Запуск очистки старых файлов
     asyncio.create_task(cleanup_old_files())
     
-    # Запуск polling
-    await dp.start_polling(bot)
+    # Запуск polling с allowed_updates для предотвращения конфликтов
+    await dp.start_polling(bot, allowed_updates=[])
 
 if __name__ == '__main__':
     try:
