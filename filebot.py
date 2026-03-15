@@ -718,19 +718,28 @@ async def cleanup_old_files():
 # 🌐 Health Check для Render
 # ─────────────────────────────────────────────────────────────
 async def health_check(request):
-    """Простой endpoint для проверки статуса"""
-    return web.Response(text="OK")
+    """Endpoint для проверки статуса бота"""
+    return web.json_response({
+        'status': 'ok',
+        'bot': '@TikO_Nbot',
+        'timestamp': datetime.now().isoformat()
+    })
 
 async def run_webserver():
-    """Запуск HTTP сервера на порту 8080"""
+    """Запуск HTTP сервера на порту из переменной окружения PORT"""
+    port = int(os.getenv('PORT', 8080))
+    
     app = web.Application()
     app.router.add_get('/', health_check)
+    app.router.add_get('/health', health_check)
     
     runner = web.AppRunner(app)
     await runner.setup()
-    site = web.TCPSite(runner, '0.0.0.0', 8080)
+    
+    site = web.TCPSite(runner, '0.0.0.0', port)
     await site.start()
-    logger.info("🌐 Health Check запущен на порту 8080")
+    
+    logger.info(f"🌐 Health Check сервер запущен на порту {port}")
 
 # ─────────────────────────────────────────────────────────────
 # 🚀 Запуск
