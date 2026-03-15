@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: fileshare-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python filebot.py
+    envVars:
+      - key: TG_BOT_TOKEN
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
